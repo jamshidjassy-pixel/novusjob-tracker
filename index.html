@@ -673,8 +673,22 @@ function switchView(name) {
 
 /* ---------- FORM ---------- */
 function nextRef() {
-  if (!jobs.length) return 1;
-  return Math.max(...jobs.map(j => parseInt(j.ref) || 0)) + 1;
+  let maxNum = 2199; // Base number so the first one becomes 2200
+  
+  if (jobs.length > 0) {
+    jobs.forEach(j => {
+      if (j.ref) {
+        // Extract only the numbers from the reference (e.g., "NOVDXB2205" -> 2205)
+        const numStr = j.ref.toString().replace(/[^0-9]/g, '');
+        const num = parseInt(numStr, 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    });
+  }
+  
+  return "NOVDXB" + (maxNum + 1);
 }
 function resetForm() {
   editingId = null;
