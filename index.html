@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Job Tracker • Cloud</title>
+
+<!-- Firebase (compat SDK - single-file friendly) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+
+<!-- SheetJS + Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    --primary: #667eea;
+    --primary-dark: #5568d3;
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #2d3748;
+    --muted: #718096;
+    --border: #e2e8f0;
+    --success: #48bb78;
+    --danger: #f56565;
+    --warning: #ed8936;
+    --nav-height: 64px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow-x: hidden;
+  }
+
+  /* ---------- LOGIN SCREEN ---------- */
+  .login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+  }
+  .login-card {
+    background: white;
+    padding: 40px 30px;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+  }
+  .login-card h1 { font-size: 1.8rem; margin-bottom: 8px; color: var(--text); }
+  .login-card p { color: var(--muted); margin-bottom: 25px; font-size: 0.95rem; }
+  .login-btn {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: transform 0.15s;
+  }
+  .login-btn:hover { transform: translateY(-2px); }
+  .login-google { background: #4285f4; color: white; }
+  .login-anon { background: var(--border); color: var(--text); }
+  .login-error { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 20px; }
+
+  /* ---------- APP LAYOUT ---------- */
+  .app { display: none; min-height: 100vh; padding-bottom: calc(var(--nav-height) + 20px); }
+  .app.active { display: block; }
+
+  .topbar {
+    background: white;
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .topbar h1 { font-size: 1.2rem; color: var(--primary); }
+  .user-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .user-chip img { width: 32px; height: 32px; border-radius: 50%; }
+  .sync-indicator {
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #e6fffa;
+    color: #234e52;
+  }
+  .sync-indicator.offline { background: #fed7d7; color: #742a2a; }
+
+  /* ---------- VIEWS ---------- */
+  .view { display: none; padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .view.active { display: block; animation: fadeIn 0.25s; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .card {
+    background: var(--card);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 1.05rem; margin-bottom: 14px; color: var(--text); }
+
+  /* Status grid */
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  .status-card {
+    padding: 16px 10px;
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .status-card:hover { transform: translateY(-3px); }
+  .status-card h3 { font-size: 0.72rem; margin-bottom: 6px; opacity: 0.95; font-weight: 500; }
+  .status-card .count { font-size: 1.8rem; font-weight: bold; }
+  .sc-1 { background: linear-gradient(135deg, #667eea, #764ba2); }
+  .sc-2 { background: linear-gradient(135deg, #f093fb, #f5576c); }
+  .sc-3 { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+  .sc-4 { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+  .sc-5 { background: linear-gradient(135deg, #fa709a, #fee140); }
+  .sc-6 { background: linear-gradient(135deg, #30cfd0, #330867); }
+  .sc-7 { background: linear-gradient(135deg, #a8edea, #fed6e3); color: #333; }
+
+  /* Charts */
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .charts-row { grid-template-columns: 1fr; } }
+
+  /* Forms */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .form-grid label { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+  .form-grid input, .form-grid select, .form-grid textarea {
+    margin-top: 5px;
+    padding: 10px 12px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    width: 100%;
+  }
+  .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
+    outline: none; border-color: var(--primary);
+  }
+
+  /* Buttons */
+  button, .btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.88rem;
+    transition: transform 0.15s, box-shadow 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: center;
+  }
+  button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-success { background: var(--success); color: white; }
+  .btn-danger  { background: var(--danger); color: white; }
+  .btn-warning { background: var(--warning); color: white; }
+  .btn-info    { background: #4299e1; color: white; }
+  .btn-outline { background: white; color: var(--text); border: 2px solid var(--border); }
+  .btn-block { width: 100%; }
+
+  /* Search */
+  .search-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .search-row input, .search-row select {
+    padding: 10px 12px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th {
+    background: #4a5568;
+    color: white;
+    padding: 10px 8px;
+    text-align: left;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--border); }
+  tr:hover { background: #f7fafc; }
+  .badge {
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    display: inline-block;
+  }
+
+  /* Mobile card view for jobs */
+  .job-card-mobile {
+    background: white;
+    padding: 14px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    border-left: 4px solid var(--primary);
+  }
+  .job-card-mobile .ref { font-weight: bold; color: var(--primary); font-size: 1rem; }
+  .job-card-mobile .row { display: flex; justify-content: space-between; font-size: 0.82rem; margin-top: 4px; color: var(--muted); }
+  .job-card-mobile .row strong { color: var(--text); }
+  .job-card-mobile .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .job-card-mobile .actions button { flex: 1; padding: 7px; font-size: 0.78rem; }
+
+  /* Bottom Navigation */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: var(--nav-height);
+    background: white;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 200;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  }
+  .nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 8px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    transition: color 0.2s;
+    border: none;
+    background: none;
+  }
+  .nav-item:hover { transform: none; box-shadow: none; }
+  .nav-item.active { color: var(--primary); }
+  .nav-item .icon { font-size: 1.4rem; }
+  .nav-item.fab {
+    position: relative;
+    top: -18px;
+  }
+  .nav-item.fab .icon {
+    background: var(--primary);
+    color: white;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+  }
+  .nav-item.fab.active .icon { background: var(--primary-dark); }
+
+  /* Desktop: show top tabs instead of bottom nav */
+  @media (min-width: 769px) {
+    .bottom-nav {
+      position: static;
+      height: auto;
+      border-top: none;
+      border-bottom: 1px solid var(--border);
+      box-shadow: none;
+      justify-content: flex-start;
+      padding: 0 20px;
+      gap: 4px;
+    }
+    .nav-item {
+      flex: 0 0 auto;
+      flex-direction: row;
+      padding: 14px 18px;
+      font-size: 0.9rem;
+      gap: 8px;
+      border-bottom: 3px solid transparent;
+    }
+    .nav-item.active { border-bottom-color: var(--primary); }
+    .nav-item .icon { font-size: 1.1rem; }
+    .nav-item.fab { top: 0; margin-left: auto; }
+    .nav-item.fab .icon {
+      width: auto;
+      height: auto;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      box-shadow: none;
+      background: var(--primary);
+      color: white;
+    }
+    .app { padding-bottom: 20px; }
+  }
+
+  /* Profile */
+  .profile-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .profile-info img { width: 64px; height: 64px; border-radius: 50%; }
+  .profile-info h3 { font-size: 1.2rem; }
+  .profile-info p { color: var(--muted); font-size: 0.9rem; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: calc(var(--nav-height) + 20px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2d3748;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 0.9rem;
+    max-width: 90%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN SCREEN ================= -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <h1>📊 Job Tracker</h1>
+    <p>Sign in to access your shared workspace</p>
+    <button class="login-btn login-google" onclick="signInGoogle()">
+      <span style="font-size:1.4rem; font-weight:bold;">G</span> Continue with Google
+    </button>
+    <button class="login-btn login-anon" onclick="signInAnon()">
+      👤 Continue as Guest
+    </button>
+    <div class="login-error" id="loginError"></div>
+    <p style="font-size:0.75rem; color:#a0aec0; margin-top:20px;">
+      All signed-in users share the same workspace data.
+    </p>
+  </div>
+</div>
+
+<!-- ================= MAIN APP ================= -->
+<div class="app" id="app">
+
+  <div class="topbar">
+    <h1>📊 Job Tracker</h1>
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span class="sync-indicator" id="syncIndicator">● Synced</span>
+      <div class="user-chip" id="userChip"></div>
+    </div>
+  </div>
+
+  <!-- Desktop tabs + Mobile bottom nav (same element) -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-view="dashboard" onclick="switchView('dashboard')">
+      <span class="icon">📊</span><span>Dashboard</span>
+    </button>
+    <button class="nav-item" data-view="jobs" onclick="switchView('jobs')">
+      <span class="icon">📋</span><span>Jobs</span>
+    </button>
+    <button class="nav-item fab" data-view="add" onclick="switchView('add')">
+      <span class="icon">＋</span><span>Add</span>
+    </button>
+    <button class="nav-item" data-view="profile" onclick="switchView('profile')">
+      <span class="icon"></span><span>Profile</span>
+    </button>
+  </nav>
+
+  <!-- ============ DASHBOARD VIEW ============ -->
+  <div class="view active" id="view-dashboard">
+    <div class="card">
+      <h2>📈 Job Status Overview</h2>
+      <div class="status-grid" id="statusGrid"></div>
+    </div>
+
+    <div class="charts-row">
+      <div class="card">
+        <h2>Jobs by Status</h2>
+        <canvas id="statusChart" height="200"></canvas>
+      </div>
+      <div class="card">
+        <h2>Jobs by Sales Person</h2>
+        <canvas id="salesChart" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>👥 Jobs per Sales Person</h2>
+      <div id="salesSummary"></div>
+    </div>
+  </div>
+
+  <!-- ============ JOBS VIEW ============ -->
+  <div class="view" id="view-jobs">
+    <div class="card">
+      <h2>🔍 Search & Filter</h2>
+      <div class="search-row">
+        <input type="text" id="searchInput" placeholder="Search REF, Frezza, Customer, POL, POD..." oninput="renderTable()">
+        <select id="filterSales" onchange="renderTable()"><option value="">All Sales</option></select>
+        <select id="filterStatus" onchange="renderTable()"><option value="">All Status</option></select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📋 All Jobs <span id="jobCount" style="color:var(--muted); font-weight:normal; font-size:0.85rem;"></span></h2>
+      <!-- Desktop table -->
+      <div class="table-wrap" id="desktopTable">
+        <table>
+          <thead>
+            <tr>
+              <th>REF</th><th>CS</th><th>Sales</th><th>Customer</th>
+              <th>POL</th><th>POD</th><th>Cargo / Transport Details</th><th>Mode</th>
+              <th>Status</th><th>Frezza #</th><th>Remarks</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </div>
+      <!-- Mobile cards -->
+      <div id="mobileCards" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- ============ ADD/EDIT VIEW ============ -->
+  <div class="view" id="view-add">
+    <div class="card">
+      <h2 id="formTitle">➕ Add New Job</h2>
+      <div class="form-grid">
+        <label>REF NO. <input type="text" id="f_ref" readonly placeholder="Auto"></label>
+        <label>Customer Service Person <input type="text" id="f_csp"></label>
+        <label>Sales Person <input type="text" id="f_sp"></label>
+        <label>Customer Name <input type="text" id="f_cust"></label>
+        <label>POL <input type="text" id="f_pol"></label>
+        <label>POD <input type="text" id="f_pod"></label>
+        <label>Cargo / Transport Details <input type="text" id="f_com"></label>
+        <label>Mode of Transport
+          <select id="f_mode">
+            <option value="">--Select--</option>
+            <option>Air</option><option>Sea</option><option>Road</option>
+            <option>Rail</option><option>Courier</option><option>Multimodal</option>
+          </select>
+        </label>
+        <label>Job Status
+          <select id="f_status">
+            <option>Job Under Process</option>
+            <option>Quote Stage</option>
+            <option>Shipment Delivered</option>
+            <option>Waiting to Get Invoiced</option>
+            <option>Invoiced Waiting for Payment</option>
+            <option>Payment Received - Job Closed</option>
+            <option>Job Closed - Quote Rejected</option>
+          </select>
+        </label>
+        <label>Frezza Job Number <input type="text" id="f_frezza"></label>
+        <label style="grid-column: 1 / -1;">Remarks <textarea id="f_remarks" rows="2"></textarea></label>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn-success" onclick="saveJob()">💾 Save Job</button>
+        <button class="btn-outline" onclick="resetForm()">🔄 Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PROFILE VIEW ============ -->
+  <div class="view" id="view-profile">
+    <div class="card">
+      <h2>👤 My Account</h2>
+      <div class="profile-info" id="profileInfo"></div>
+      <button class="btn-danger btn-block" onclick="signOut()">🚪 Sign Out</button>
+    </div>
+
+    <div class="card">
+      <h2>📥 Import Jobs from Excel</h2>
+      <p style="color:var(--muted); font-size:0.85rem; margin-bottom:12px;">
+        Upload an Excel file (.xlsx, .xls, .csv) with your existing jobs. Column headers should match: REF NO., Customer Service Person, SALES Person, CUSTOMER Name, POL, POD, Cargo / Transport Details, MODE Of Transport, Job STATUS, Remarks, Frezza Job Number.
+      </p>
+      <label class="btn-info btn-block" style="cursor:pointer;">
+        📥 Choose Excel File
+        <input type="file" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importExcel(event)">
+      </label>
+    </div>
+
+    <div class="card">
+      <h2> Export All Jobs to Excel</h2>
+      <p style="color:var(--muted); font-size:0.85rem; margin-bottom:12px;">
+        Download the complete job database as an Excel file (includes all records from all users).
+      </p>
+      <button class="btn-success btn-block" onclick="exportExcel()">📤 Download Excel</button>
+    </div>
+
+    <div class="card">
+      <h2>️ Danger Zone</h2>
+      <button class="btn-danger btn-block" onclick="clearAll()">🗑️ Delete ALL Jobs</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   ✅ YOUR FIREBASE CONFIG (already filled in!)
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyCAc9KaP84odU5_Aq036nbccxHNjMwAD4g",
+  authDomain: "job-tracker-b2007.firebaseapp.com",
+  projectId: "job-tracker-b2007",
+  storageBucket: "job-tracker-b2007.firebasestorage.app",
+  messagingSenderId: "336854987714",
+  appId: "1:336854987714:web:3ebe7ab06a13f61f695c5b"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+/* ---------- CONSTANTS ---------- */
+const STATUSES = [
+  'Job Under Process', 'Quote Stage', 'Shipment Delivered',
+  'Waiting to Get Invoiced', 'Invoiced Waiting for Payment',
+  'Payment Received - Job Closed', 'Job Closed - Quote Rejected'
+];
+const STATUS_COLORS = {
+  'Job Under Process':'#667eea','Quote Stage':'#f5576c','Shipment Delivered':'#4facfe',
+  'Waiting to Get Invoiced':'#43e97b','Invoiced Waiting for Payment':'#fa709a',
+  'Payment Received - Job Closed':'#30cfd0','Job Closed - Quote Rejected':'#cbd5e0'
+};
+
+let jobs = [];
+let editingId = null;
+let currentUser = null;
+let statusChart, salesChart;
+let unsubscribe = null;
+
+/* ---------- UI HELPERS ---------- */
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+function setSync(state) {
+  const el = document.getElementById('syncIndicator');
+  if (state === 'syncing') { el.textContent = '⟳ Syncing...'; el.classList.add('offline'); }
+  else if (state === 'offline') { el.textContent = '● Offline'; el.classList.add('offline'); }
+  else { el.textContent = '● Synced'; el.classList.remove('offline'); }
+}
+
+/* ---------- AUTH ---------- */
+auth.onAuthStateChanged(user => {
+  if (user) {
+    currentUser = user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').classList.add('active');
+    renderUserChip();
+    startListening();
+  } else {
+    currentUser = null;
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('app').classList.remove('active');
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  }
+});
+
+function renderUserChip() {
+  const name = currentUser.displayName || (currentUser.isAnonymous ? 'Guest' : 'User');
+  const pic = currentUser.photoURL || '';
+  document.getElementById('userChip').innerHTML = pic
+    ? `<img src="${pic}" alt=""><span>${name}</span>`
+    : `<span>👤 ${name}</span>`;
+
+  document.getElementById('profileInfo').innerHTML = `
+    ${pic ? `<img src="${pic}" alt="">` : ''}
+    <div>
+      <h3>${name}</h3>
+      <p>${currentUser.email || 'Guest user (data shared with other guests)'}</p>
+      <p style="font-size:0.75rem; margin-top:4px;">User ID: ${currentUser.uid.slice(0,10)}...</p>
+    </div>
+  `;
+}
+
+async function signInGoogle() {
+  document.getElementById('loginError').textContent = '';
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await auth.signInWithPopup(provider);
+  } catch (e) {
+    document.getElementById('loginError').textContent = e.message;
+  }
+}
+async function signInAnon() {
+  document.getElementById('loginError').textContent = '';
+  try { await auth.signInAnonymously(); }
+  catch (e) { document.getElementById('loginError').textContent = e.message; }
+}
+function signOut() {
+  if (confirm('Sign out?')) auth.signOut();
+}
+
+/* ---------- FIRESTORE REAL-TIME LISTENER ---------- */
+function startListening() {
+  setSync('syncing');
+  unsubscribe = db.collection('jobs').onSnapshot(snapshot => {
+    jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setSync('synced');
+    renderAll();
+  }, err => {
+    console.error(err);
+    setSync('offline');
+    toast('⚠️ Sync error: ' + err.message);
+  });
+}
+
+/* ---------- NAVIGATION ---------- */
+function switchView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector(`.nav-item[data-view="${name}"]`).classList.add('active');
+  if (name === 'add' && editingId === null) resetForm();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ---------- FORM ---------- */
+function nextRef() {
+  if (!jobs.length) return 1;
+  return Math.max(...jobs.map(j => parseInt(j.ref) || 0)) + 1;
+}
+function resetForm() {
+  editingId = null;
+  document.getElementById('formTitle').textContent = '➕ Add New Job';
+  ['f_csp','f_sp','f_cust','f_pol','f_pod','f_com','f_frezza','f_remarks'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('f_mode').value = '';
+  document.getElementById('f_status').value = STATUSES[0];
+  document.getElementById('f_ref').value = nextRef();
+}
+function editJob(id) {
+  const j = jobs.find(x => x.id === id);
+  if (!j) return;
+  editingId = id;
+  document.getElementById('formTitle').textContent = '✏️ Edit Job #' + j.ref;
+  document.getElementById('f_ref').value = j.ref;
+  document.getElementById('f_csp').value = j.csp || '';
+  document.getElementById('f_sp').value = j.sp || '';
+  document.getElementById('f_cust').value = j.cust || '';
+  document.getElementById('f_pol').value = j.pol || '';
+  document.getElementById('f_pod').value = j.pod || '';
+  document.getElementById('f_com').value = j.com || '';
+  document.getElementById('f_mode').value = j.mode || '';
+  document.getElementById('f_status').value = j.status || STATUSES[0];
+  document.getElementById('f_frezza').value = j.frezza || '';
+  document.getElementById('f_remarks').value = j.remarks || '';
+  switchView('add');
+}
+
+async function saveJob() {
+  const data = {
+    ref: document.getElementById('f_ref').value,
+    csp: document.getElementById('f_csp').value.trim(),
+    sp: document.getElementById('f_sp').value.trim(),
+    cust: document.getElementById('f_cust').value.trim(),
+    pol: document.getElementById('f_pol').value.trim(),
+    pod: document.getElementById('f_pod').value.trim(),
+    com: document.getElementById('f_com').value.trim(),
+    mode: document.getElementById('f_mode').value,
+    status: document.getElementById('f_status').value,
+    frezza: document.getElementById('f_frezza').value.trim(),
+    remarks: document.getElementById('f_remarks').value.trim(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: currentUser.uid
+  };
+  setSync('syncing');
+  try {
+    if (editingId) {
+      await db.collection('jobs').doc(editingId).update(data);
+      toast('✅ Job updated');
+    } else {
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.createdBy = currentUser.uid;
+      await db.collection('jobs').add(data);
+      toast('✅ Job added');
+    }
+    resetForm();
+    switchView('jobs');
+  } catch (e) {
+    toast('❌ Error: ' + e.message);
+    setSync('offline');
+  }
+}
+
+async function deleteJob(id) {
+  if (!confirm('Delete this job?')) return;
+  setSync('syncing');
+  try {
+    await db.collection('jobs').doc(id).delete();
+    toast('🗑️ Job deleted');
+  } catch (e) { toast(' ' + e.message); }
+}
+
+async function clearAll() {
+  if (!confirm('Delete ALL jobs from the cloud? This cannot be undone.')) return;
+  if (!confirm('Are you REALLY sure? All data will be lost for everyone.')) return;
+  setSync('syncing');
+  try {
+    const batch = db.batch();
+    jobs.forEach(j => batch.delete(db.collection('jobs').doc(j.id)));
+    await batch.commit();
+    toast('🗑️ All jobs deleted');
+  } catch (e) { toast('❌ ' + e.message); }
+}
+
+/* ---------- RENDERING ---------- */
+function renderStatusGrid() {
+  const counts = {}; STATUSES.forEach(s => counts[s] = 0);
+  jobs.forEach(j => { if (counts[j.status] !== undefined) counts[j.status]++; });
+  const colors = ['sc-1','sc-2','sc-3','sc-4','sc-5','sc-6','sc-7'];
+  document.getElementById('statusGrid').innerHTML = STATUSES.map((s, i) => `
+    <div class="status-card ${colors[i]}" onclick="filterByStatus('${s.replace(/'/g,"\\'")}')">
+      <h3>${s}</h3><div class="count">${counts[s]}</div>
+    </div>
+  `).join('');
+}
+function filterByStatus(s) {
+  document.getElementById('filterStatus').value = s;
+  switchView('jobs');
+  renderTable();
+}
+
+function renderSalesSummary() {
+  const map = {};
+  jobs.forEach(j => { const k = j.sp || '(Unassigned)'; map[k] = (map[k] || 0) + 1; });
+  const sorted = Object.entries(map).sort((a,b) => b[1] - a[1]);
+  document.getElementById('salesSummary').innerHTML = sorted.length
+    ? `<div class="table-wrap"><table><thead><tr><th>Sales Person</th><th>Total Jobs</th></tr></thead>
+       <tbody>${sorted.map(([n,c]) => `<tr><td><strong>${n}</strong></td><td>${c}</td></tr>`).join('')}</tbody></table></div>`
+    : '<p style="color:var(--muted);">No data yet.</p>';
+
+  const sel = document.getElementById('filterSales');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Sales</option>' +
+    sorted.map(([n]) => `<option value="${n}" ${n===cur?'selected':''}>${n}</option>`).join('');
+
+  const fs = document.getElementById('filterStatus');
+  const curSt = fs.value;
+  fs.innerHTML = '<option value="">All Status</option>' +
+    STATUSES.map(s => `<option value="${s}" ${s===curSt?'selected':''}>${s}</option>`).join('');
+}
+
+function renderCharts() {
+  const counts = {}; STATUSES.forEach(s => counts[s] = 0);
+  jobs.forEach(j => { if (counts[j.status] !== undefined) counts[j.status]++; });
+  const salesMap = {};
+  jobs.forEach(j => { const k = j.sp || '(Unassigned)'; salesMap[k] = (salesMap[k] || 0) + 1; });
+
+  if (statusChart) statusChart.destroy();
+  statusChart = new Chart(document.getElementById('statusChart'), {
+    type: 'doughnut',
+    data: {
+      labels: STATUSES,
+      datasets: [{ data: STATUSES.map(s => counts[s]),
+        backgroundColor: ['#667eea','#f5576c','#4facfe','#43e97b','#fa709a','#30cfd0','#a8edea'] }]
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } } }
+  });
+
+  if (salesChart) salesChart.destroy();
+  const labels = Object.keys(salesMap);
+  salesChart = new Chart(document.getElementById('salesChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Jobs', data: labels.map(k => salesMap[k]), backgroundColor: '#667eea' }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+  });
+}
+
+function getFilteredJobs() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const fs = document.getElementById('filterSales').value;
+  const fst = document.getElementById('filterStatus').value;
+  return jobs.filter(j => {
+    if (fs && j.sp !== fs) return false;
+    if (fst && j.status !== fst) return false;
+    if (q) {
+      const hay = `${j.ref} ${j.frezza} ${j.cust} ${j.pol} ${j.pod} ${j.com} ${j.sp} ${j.csp}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a,b) => (parseInt(b.ref)||0) - (parseInt(a.ref)||0));
+}
+
+function renderTable() {
+  const filtered = getFilteredJobs();
+  document.getElementById('jobCount').textContent = `(${filtered.length} of ${jobs.length})`;
+  const isMobile = window.innerWidth < 768;
+
+  if (isMobile) {
+    document.getElementById('desktopTable').classList.add('hidden');
+    document.getElementById('mobileCards').classList.remove('hidden');
+    document.getElementById('mobileCards').innerHTML = filtered.length
+      ? filtered.map(j => `
+        <div class="job-card-mobile" style="border-left-color:${STATUS_COLORS[j.status]||'#ccc'}">
+          <div class="ref">#${j.ref} — ${j.frezza||'No Frezza #'}</div>
+          <div class="row"><span>Customer:</span><strong>${j.cust||'-'}</strong></div>
+          <div class="row"><span>Sales:</span><strong>${j.sp||'-'}</strong></div>
+          <div class="row"><span>Route:</span><strong>${j.pol||'-'} → ${j.pod||'-'}</strong></div>
+          <div class="row"><span>Mode:</span><strong>${j.mode||'-'}</strong></div>
+          <div style="margin-top:8px;">
+            <span class="badge" style="background:${STATUS_COLORS[j.status]||'#ccc'};color:${j.status==='Job Closed - Quote Rejected'?'#333':'white'}">${j.status||''}</span>
+          </div>
+          <div class="actions">
+            <button class="btn-primary" onclick="editJob('${j.id}')">✏️ Edit</button>
+            <button class="btn-danger" onclick="deleteJob('${j.id}')">🗑️</button>
+          </div>
+        </div>
+      `).join('')
+      : '<p style="text-align:center; padding:30px; color:var(--muted);">No jobs found.</p>';
+  } else {
+    document.getElementById('desktopTable').classList.remove('hidden');
+    document.getElementById('mobileCards').classList.add('hidden');
+    document.getElementById('jobsBody').innerHTML = filtered.length
+      ? filtered.map(j => `
+        <tr>
+          <td><strong>${j.ref}</strong></td>
+          <td>${j.csp||''}</td><td>${j.sp||''}</td><td>${j.cust||''}</td>
+          <td>${j.pol||''}</td><td>${j.pod||''}</td><td>${j.com||''}</td><td>${j.mode||''}</td>
+          <td><span class="badge" style="background:${STATUS_COLORS[j.status]||'#ccc'};color:${j.status==='Job Closed - Quote Rejected'?'#333':'white'}">${j.status||''}</span></td>
+          <td>${j.frezza||''}</td><td>${j.remarks||''}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn-primary" style="padding:5px 9px; font-size:0.78rem;" onclick="editJob('${j.id}')">Edit</button>
+            <button class="btn-danger" style="padding:5px 9px; font-size:0.78rem;" onclick="deleteJob('${j.id}')">Del</button>
+          </td>
+        </tr>
+      `).join('')
+      : `<tr><td colspan="12" style="text-align:center; padding:30px; color:var(--muted);">No jobs found.</td></tr>`;
+  }
+}
+window.addEventListener('resize', renderTable);
+
+function renderAll() {
+  renderStatusGrid();
+  renderSalesSummary();
+  renderCharts();
+  renderTable();
+}
+
+/* ---------- EXCEL IMPORT ---------- */
+function importExcel(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      setSync('syncing');
+      const data = new Uint8Array(ev.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+      if (!rows.length) { toast('⚠️ Empty file'); return; }
+
+      const batchSize = 400;
+      let added = 0;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = db.batch();
+        const chunk = rows.slice(i, i + batchSize);
+        chunk.forEach(r => {
+          const ref = db.collection('jobs').doc();
+          batch.set(ref, {
+            ref: String(r['REF NO.'] || r['REF NO'] || r['REF'] || r['Ref No'] || ''),
+            csp: r['Customer Service Person'] || r['CSP'] || '',
+            sp: r['SALES Person'] || r['Sales Person'] || '',
+            cust: r['CUSTOMER Name'] || r['Customer Name'] || r['Customer'] || '',
+            pol: r['POL'] || '',
+            pod: r['POD'] || '',
+            com: r['Cargo / Transport Details'] || r['Cargo / Transport Details'] || '',
+            mode: r['MODE Of Transport'] || r['Mode Of Transport'] || r['Mode'] || '',
+            status: r['Job STATUS'] || r['Job Status'] || r['Status'] || STATUSES[0],
+            remarks: r['Remarks'] || r['REMARKS'] || '',
+            frezza: r['Frezza Job Number'] || r['Frezza Job No'] || r['Frezza'] || '',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdBy: currentUser.uid,
+            importedAt: new Date().toISOString(),
+            source: 'excel-import'
+          });
+        });
+        await batch.commit();
+        added += chunk.length;
+        toast(` Imported ${added}/${rows.length}...`);
+      }
+      toast(`✅ Imported ${added} jobs to cloud`);
+    } catch (err) {
+      alert('Import error: ' + err.message);
+      setSync('offline');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+}
+
+/* ---------- EXCEL EXPORT ---------- */
+function exportExcel() {
+  if (!jobs.length) { toast('⚠️ No data to export'); return; }
+  const rows = jobs.map(j => ({
+    'REF NO.': j.ref,
+    'Customer Service Person': j.csp,
+    'SALES Person': j.sp,
+    'CUSTOMER Name': j.cust,
+    'POL': j.pol,
+    'POD': j.pod,
+    'Cargo / Transport Details': j.com,
+    'MODE Of Transport': j.mode,
+    'Job STATUS': j.status,
+    'Remarks': j.remarks,
+    'Frezza Job Number': j.frezza
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Jobs');
+  XLSX.writeFile(wb, `JobTracker_${new Date().toISOString().slice(0,10)}.xlsx`);
+  toast('📤 Exported to Excel');
+}
+
+/* ---------- ONLINE/OFFLINE ---------- */
+window.addEventListener('online', () => { setSync('syncing'); toast('🟢 Back online'); });
+window.addEventListener('offline', () => { setSync('offline'); toast('🔴 You are offline'); });
+</script>
+</body>
+</html>
