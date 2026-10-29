@@ -918,15 +918,6 @@ function importExcel(e) {
       const wb = XLSX.read(data, { type: 'array' });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       
-      // Get raw headers to debug
-      const range = XLSX.utils.decode_range(sheet['!ref']);
-      const headers = [];
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cell = sheet[XLSX.utils.encode_cell({r: 0, c: C})];
-        headers.push(cell ? cell.v : '');
-      }
-      console.log('Excel Headers Found:', headers);
-      
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       if (!rows.length) { toast('⚠️ Empty file'); return; }
 
@@ -948,18 +939,24 @@ function importExcel(e) {
         const chunk = rows.slice(i, i + batchSize);
         
         for (let r of chunk) {
-          // Get all keys and clean them
           const keys = Object.keys(r);
           
-          // Helper function with better matching
+          // IMPROVED: Check for EXACT matches first, then partial
           const findCol = (searchTerms) => {
+            // First try exact match
             for (let term of searchTerms) {
-              const key = keys.find(k => {
-                const cleanKey = k.toString().trim().toLowerCase();
-                const cleanTerm = term.toString().trim().toLowerCase();
-                return cleanKey.includes(cleanTerm);
-              });
-              if (key) return r[key];
+              const exactKey = keys.find(k => k.toString().trim() === term.toString().trim());
+              if (exactKey) return r[exactKey];
+            }
+            // Then try "starts with" match
+            for (let term of searchTerms) {
+              const startsWithKey = keys.find(k => k.toString().trim().toLowerCase().startsWith(term.toString().trim().toLowerCase()));
+              if (startsWithKey) return r[startsWithKey];
+            }
+            // Finally try "contains" match
+            for (let term of searchTerms) {
+              const containsKey = keys.find(k => k.toString().trim().toLowerCase().includes(term.toString().trim().toLowerCase()));
+              if (containsKey) return r[containsKey];
             }
             return '';
           };
@@ -980,9 +977,11 @@ function importExcel(e) {
           const docRef = db.collection('jobs').doc();
           batch.set(docRef, {
             ref: String(finalRef),
-            csp: findCol(['Customer Service Person', 'Customer Service Perso', 'Customer Service', 'CSP', 'CS Person']),
-            sp: findCol(['SALES Person', 'SALES Perso', 'Sales Person', 'Sales', 'SALES']),
-            cust: findCol(['CUSTOMER Name', 'CUSTOMER', 'Customer Name', 'Customer']),
+            // FIXED: More specific search terms to avoid confusion
+            csp: findCol(['Customer Service Person', 'Customer Service Perso', 'Customer Service', 'CSP']),
+            sp: findCol(['SALES Person', 'SALES Perso', 'Sales Person', 'Sales']),
+            // FIXED: Check CUSTOMER first (more specific) before generic "Customer"
+            cust: findCol(['CUSTOMER Name', 'Customer Name', 'CUSTOMER', 'Customer']),
             pol: findCol(['POL']),
             pod: findCol(['POD']),
             com: findCol(['Cargo / Transport Details', 'Cargo', 'Transport Details', 'COMMODITY', 'Commodity']),
