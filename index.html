@@ -919,31 +919,66 @@ function importExcel(e) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
       if (!rows.length) { toast('⚠️ Empty file'); return; }
 
+      // Find the highest existing number to continue auto-numbering
+      let maxNum = 2199; 
+      jobs.forEach(j => {
+        if (j.ref) {
+          const numStr = j.ref.toString().replace(/[^0-9]/g, '');
+          const num = parseInt(numStr, 10);
+          if (!isNaN(num) && num > maxNum) maxNum = num;
+        }
+      });
+
       const batchSize = 400;
       let added = 0;
+      
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = db.batch();
         const chunk = rows.slice(i, i + batchSize);
-        chunk.forEach(r => {
+        
+        for (let r of chunk) {
+          // SMART SEARCH: Finds columns even if names are slightly different
+          const keys = Object.keys(r);
+          const findVal = (searchStr) => {
+             const key = keys.find(k => k.toLowerCase().includes(searchStr.toLowerCase()));
+             return key ? r[key] : '';
+          };
+
+          // 1. Handle REF NO (Auto-generate if empty)
+          const refVal = findVal('REF NO') || findVal('REF');
+          let finalRef = refVal;
+          
+          if (!finalRef || finalRef.toString().trim() === '') {
+             maxNum++;
+             finalRef = "NOVDXB" + maxNum; // Auto-generate NOVDXB2200, 2201...
+          } else {
+             // If Excel has a number, update our counter so we don't duplicate
+             const numStr = finalRef.toString().replace(/[^0-9]/g, '');
+             const num = parseInt(numStr, 10);
+             if (!isNaN(num) && num > maxNum) maxNum = num;
+          }
+
           const ref = db.collection('jobs').doc();
           batch.set(ref, {
-            ref: String(r['REF NO.'] || r['REF NO'] || r['REF'] || r['Ref No'] || ''),
-            csp: r['Customer Service Person'] || r['CSP'] || '',
-            sp: r['SALES Person'] || r['Sales Person'] || '',
-            cust: r['CUSTOMER Name'] || r['Customer Name'] || r['Customer'] || '',
-            pol: r['POL'] || '',
-            pod: r['POD'] || '',
-            com: r['Cargo / Transport Details'] || r['Cargo / Transport Details'] || '',
-            mode: r['MODE Of Transport'] || r['Mode Of Transport'] || r['Mode'] || '',
-            status: r['Job STATUS'] || r['Job Status'] || r['Status'] || STATUSES[0],
-            remarks: r['Remarks'] || r['REMARKS'] || '',
-            frezza: r['Frezza Job Number'] || r['Frezza Job No'] || r['Frezza'] || '',
+            ref: String(finalRef),
+            // 2. Fixed Sales & CS mapping using smart search
+            csp: findVal('Customer Service') || findVal('CSP'), 
+            sp: findVal('SALES') || findVal('Sales Person'), 
+            cust: findVal('CUSTOMER') || findVal('Customer Name'),
+            pol: findVal('POL'),
+            pod: findVal('POD'),
+            // 3. Fixed Commodity mapping to look for "Cargo" or "Transport"
+            com: findVal('COMMODITY') || findVal('Cargo') || findVal('Transport'), 
+            mode: findVal('MODE') || findVal('Mode'),
+            status: findVal('Job STATUS') || findVal('Status'),
+            remarks: findVal('Remarks'),
+            frezza: findVal('Frezza'),
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             createdBy: currentUser.uid,
             importedAt: new Date().toISOString(),
             source: 'excel-import'
           });
-        });
+        }
         await batch.commit();
         added += chunk.length;
         toast(` Imported ${added}/${rows.length}...`);
@@ -957,7 +992,6 @@ function importExcel(e) {
   reader.readAsArrayBuffer(file);
   e.target.value = '';
 }
-
 /* ---------- EXCEL EXPORT ---------- */
 function exportExcel() {
   if (!jobs.length) { toast('⚠️ No data to export'); return; }
