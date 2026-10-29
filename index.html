@@ -916,10 +916,21 @@ function importExcel(e) {
       setSync('syncing');
       const data = new Uint8Array(ev.target.result);
       const wb = XLSX.read(data, { type: 'array' });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      
+      // Get raw headers to debug
+      const range = XLSX.utils.decode_range(sheet['!ref']);
+      const headers = [];
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell = sheet[XLSX.utils.encode_cell({r: 0, c: C})];
+        headers.push(cell ? cell.v : '');
+      }
+      console.log('Excel Headers Found:', headers);
+      
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       if (!rows.length) { toast('⚠️ Empty file'); return; }
 
-      // Find the highest existing number to continue auto-numbering
+      // Find highest existing number
       let maxNum = 2199; 
       jobs.forEach(j => {
         if (j.ref) {
@@ -937,42 +948,48 @@ function importExcel(e) {
         const chunk = rows.slice(i, i + batchSize);
         
         for (let r of chunk) {
-          // SMART SEARCH: Finds columns even if names are slightly different
+          // Get all keys and clean them
           const keys = Object.keys(r);
-          const findVal = (searchStr) => {
-             const key = keys.find(k => k.toLowerCase().includes(searchStr.toLowerCase()));
-             return key ? r[key] : '';
+          
+          // Helper function with better matching
+          const findCol = (searchTerms) => {
+            for (let term of searchTerms) {
+              const key = keys.find(k => {
+                const cleanKey = k.toString().trim().toLowerCase();
+                const cleanTerm = term.toString().trim().toLowerCase();
+                return cleanKey.includes(cleanTerm);
+              });
+              if (key) return r[key];
+            }
+            return '';
           };
 
-          // 1. Handle REF NO (Auto-generate if empty)
-          const refVal = findVal('REF NO') || findVal('REF');
+          // Handle REF NO
+          const refVal = findCol(['REF NO', 'REF NO.', 'REF', 'Ref No']);
           let finalRef = refVal;
           
           if (!finalRef || finalRef.toString().trim() === '') {
              maxNum++;
-             finalRef = "NOVDXB" + maxNum; // Auto-generate NOVDXB2200, 2201...
+             finalRef = "NOVDXB" + maxNum;
           } else {
-             // If Excel has a number, update our counter so we don't duplicate
              const numStr = finalRef.toString().replace(/[^0-9]/g, '');
              const num = parseInt(numStr, 10);
              if (!isNaN(num) && num > maxNum) maxNum = num;
           }
 
-          const ref = db.collection('jobs').doc();
-          batch.set(ref, {
+          const docRef = db.collection('jobs').doc();
+          batch.set(docRef, {
             ref: String(finalRef),
-            // 2. Fixed Sales & CS mapping using smart search
-            csp: findVal('Customer Service') || findVal('CSP'), 
-            sp: findVal('SALES') || findVal('Sales Person'), 
-            cust: findVal('CUSTOMER') || findVal('Customer Name'),
-            pol: findVal('POL'),
-            pod: findVal('POD'),
-            // 3. Fixed Commodity mapping to look for "Cargo" or "Transport"
-            com: findVal('COMMODITY') || findVal('Cargo') || findVal('Transport'), 
-            mode: findVal('MODE') || findVal('Mode'),
-            status: findVal('Job STATUS') || findVal('Status'),
-            remarks: findVal('Remarks'),
-            frezza: findVal('Frezza'),
+            csp: findCol(['Customer Service Person', 'Customer Service Perso', 'Customer Service', 'CSP', 'CS Person']),
+            sp: findCol(['SALES Person', 'SALES Perso', 'Sales Person', 'Sales', 'SALES']),
+            cust: findCol(['CUSTOMER Name', 'CUSTOMER', 'Customer Name', 'Customer']),
+            pol: findCol(['POL']),
+            pod: findCol(['POD']),
+            com: findCol(['Cargo / Transport Details', 'Cargo', 'Transport Details', 'COMMODITY', 'Commodity']),
+            mode: findCol(['MODE Of Transport', 'Mode Of Transport', 'MODE', 'Mode']),
+            status: findCol(['Job STATUS', 'Job Status', 'Status']),
+            remarks: findCol(['Remarks', 'REMARKS']),
+            frezza: findCol(['Frezza Job Number', 'Frezza Job No', 'Frezza']),
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             createdBy: currentUser.uid,
             importedAt: new Date().toISOString(),
@@ -981,7 +998,7 @@ function importExcel(e) {
         }
         await batch.commit();
         added += chunk.length;
-        toast(` Imported ${added}/${rows.length}...`);
+        toast(`⏳ Imported ${added}/${rows.length}...`);
       }
       toast(`✅ Imported ${added} jobs to cloud`);
     } catch (err) {
